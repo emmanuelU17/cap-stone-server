@@ -1,6 +1,9 @@
 # Sarre The Brand
 Backend of Sarre The Brand.
 
+### Getting started (pre-requisite docker)
+1. Open command line and run `./mvnw clean spring-boot:test-run`
+
 ### Technologies
 * Java 21
 * Spring Boot 3.2.1

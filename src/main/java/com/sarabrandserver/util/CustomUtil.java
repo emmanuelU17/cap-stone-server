@@ -10,6 +10,9 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -160,6 +163,10 @@ public class CustomUtil {
         }
 
         return map.get(-1L).children(); // return children of root
+    }
+
+    public static <T> Page<T> pagination(List<T> list, int page, int size, int count) {
+        return new PageImpl<>(list, PageRequest.of(page, size), count);
     }
 
 }
