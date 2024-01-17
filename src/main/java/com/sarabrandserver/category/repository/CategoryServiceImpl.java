@@ -2,15 +2,23 @@ package com.sarabrandserver.category.repository;
 
 import com.sarabrandserver.category.entity.ProductCategory;
 import com.sarabrandserver.category.mapper.CategoryMapper;
+import com.sarabrandserver.enumeration.SarreCurrency;
 import com.sarabrandserver.exception.CustomSqlException;
+import com.sarabrandserver.product.mapper.ProductMapper;
+import com.sarabrandserver.product.repository.ProductServiceImpl;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -21,6 +29,7 @@ import java.util.Optional;
 public class CategoryServiceImpl {
 
     private final JdbcClient jdbcClient;
+    private final ProductServiceImpl productService;
 
     public ProductCategory save(@NotNull ProductCategory category) {
         String sql = """
@@ -141,22 +150,47 @@ public class CategoryServiceImpl {
         return i > 0;
     }
 
-    public boolean validateCategoryNameIsNotAssignedToCategoryId(
-            @NotNull long categoryId,
-            @NotNull String categoryName
-    ) {
-        String sql = """
-        SELECT COUNT(c.category_id)
-        FROM product_category c
-        WHERE c.name = :name AND c.parent_category_id != :id
-        """;
-        Integer i = jdbcClient.sql(sql)
-                .param("name", categoryName)
-                .param("id", categoryId)
-                .query(Integer.class)
-                .single();
+    /**
+     * First thing is the method below is called before a {@code ProductCategory}
+     * name is updated. It does its validation by:
+     * 1. Traverse the db to find if the new category name {@param categoryName} exist.
+     *      <br></br> <br></br>
+     * 2. We validate the sql query to make sure it is returning the needed values.
+     *    CategoryId is what we need and error of type CustomSqlException is thrown
+     *    if categoryId is null.<br></br><br></br>
+     * 3. If both step 1 and 2 pass, we finally check if the id from the query equals
+     *    {@param categoryId}. If they equal that means we are replacing the name of the
+     *    matching ids, but if it returns false, it means the newName or {@param categoryName}
+     *    we want to insert is associated to another id.
+     *
+     * @param categoryId is the {@code ProductCategory} whose name is to be replaced.
+     * @param categoryName is the new name of {@code ProductCategory}.
+     * @throws CustomSqlException if sql query returns an id of null.
+     * @return boolean where true means we can update and false means do not update as duplicate
+     * exception will be thrown.
+     * */
+    public boolean validateCategoryNameExist(@NotNull long categoryId, @NotNull String categoryName) {
+        record Mapper(String name, Long id) {}
 
-        return i > 0;
+        String sql = """
+        SELECT c.name as name, c.category_id as id
+        FROM product_category c
+        WHERE c.name = :name
+        """;
+
+        var m = jdbcClient.sql(sql)
+                .param("name", categoryName)
+                .query(Mapper.class)
+                .optional();
+
+        if (m.isEmpty()) return true;
+
+        Long id = m.get().id();
+
+        if (id == null)
+            throw new CustomSqlException("invalid sql query as id is null");
+
+        return id == categoryId;
     }
 
     @Transactional
@@ -266,6 +300,103 @@ public class CategoryServiceImpl {
                 .param("id", categoryId)
                 .query(CategoryMapper.class)
                 .list();
+    }
+
+    /**
+     * Using native sql query, method returns all {@code Product} based on
+     * {@code ProductCategory} and its children.
+     *
+     * @param categoryId is the {@code ProductCategory} and all of its children
+     * @param currency is the string value of {@code SarreCurrency}
+     * @param page is the of {@code org.springframework.data.domain.Pageable}
+     * @return a {@code org.springframework.data.domain.Page} of {@code ProductPojo}
+     * */
+    public Page<ProductMapper> allProductByCategoryIdWhereIsVisibleAndInStock(
+            @NotNull long categoryId,
+            @NotNull SarreCurrency currency,
+            @NotNull Pageable page
+    ) {
+        record Mapper(String uuid, String name, String description, String currency, BigDecimal price, String image) {}
+
+        int totalProducts = productService.count();
+
+        String sql = """
+        WITH RECURSIVE category (id) AS
+        (
+            SELECT c.category_id FROM product_category AS c WHERE c.category_id = :id
+            UNION ALL
+            SELECT pc.category_id FROM category cat INNER JOIN product_category pc ON cat.id = pc.parent_category_id
+        )
+        SELECT
+            p.uuid AS uuid,
+            p.name AS name,
+            p.description AS description,
+            pr.currency AS currency,
+            pr.price AS price,
+            p.default_image_key AS image
+        FROM category c1
+        INNER JOIN product p ON c1.id = p.category_id
+        INNER JOIN product_detail d ON p.product_id = d.product_id
+        INNER JOIN price_currency pr ON p.product_id = pr.product_id
+        INNER JOIN product_sku s ON d.detail_id = s.detail_id
+        WHERE d.is_visible = 1 AND s.inventory > 0 AND pr.currency = :currency
+        GROUP BY p.uuid, p.name, p.description, p.default_image_key, pr.price, pr.currency
+        LIMIT :size OFFSET :calc;
+        """;
+
+        var list = jdbcClient.sql(sql)
+                .param("id", categoryId)
+                .param("currency", currency.getCurrency())
+                .param("size", page.getPageSize())
+                .param("calc", page.getOffset())
+                .query(Mapper.class)
+                .list()
+                .stream()
+                .map(m -> new ProductMapper(m.uuid, m.name, m.description,
+                        m.currency, m.price, m.image, "")
+                )
+                .toList();
+
+        return new PageImpl<>(list, page, totalProducts);
+    }
+
+    public Page<ProductMapper> allProductsByCategoryIdWorker(
+            @NotNull long categoryId,
+            @NotNull SarreCurrency currency,
+            @NotNull PageRequest page
+    ) {
+        record CXMapper(String uuid, String name, String currency, BigDecimal price, String image) {}
+
+        int totalProducts = productService.count();
+
+        String sql = """
+        SELECT
+            p.uuid AS uuid,
+            p.name AS name,
+            p.default_image_key AS image,
+            c.currency AS currency,
+            c.price AS price
+        FROM product p
+        INNER JOIN product_category c ON p.category_id = c.category_id
+        INNER JOIN price_currency c ON p.product_id = c.product_id
+        WHERE c.category_id = :id AND c.currency = :currency
+        GROUP BY p.uuid, p.name, p.default_image_key, c.price, c.currency
+        LIMIT :size OFFSET :off;
+        """;
+
+        var list = jdbcClient.sql(sql)
+                .param("id", categoryId)
+                .param("currency", currency.getCurrency())
+                .param("size", page.getPageSize())
+                .param("off", page.getOffset())
+                .query(CXMapper.class)
+                .stream()
+                .map(m -> new ProductMapper(m.uuid(), m.name(), "",
+                        m.currency(), m.price(), m.image(), "")
+                )
+                .toList();
+
+        return new PageImpl<>(list, page, totalProducts);
     }
 
 }

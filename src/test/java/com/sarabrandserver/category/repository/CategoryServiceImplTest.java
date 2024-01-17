@@ -3,11 +3,13 @@ package com.sarabrandserver.category.repository;
 import com.github.javafaker.Faker;
 import com.sarabrandserver.AbstractRepositoryTest;
 import com.sarabrandserver.category.entity.ProductCategory;
+import com.sarabrandserver.enumeration.SarreCurrency;
 import com.sarabrandserver.product.entity.Product;
 import com.sarabrandserver.product.repository.ProductServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashSet;
@@ -227,7 +229,6 @@ class CategoryServiceImplTest extends AbstractRepositoryTest {
         assertFalse(categoryService.validateCategoryIsAParent(clothes.getCategoryId()));
     }
 
-    // TODO
     @Test
     void validateCategoryNameIsNotAssignedToCategoryId() {
         var category = categoryService
@@ -242,19 +243,15 @@ class CategoryServiceImplTest extends AbstractRepositoryTest {
                                 .build()
                 );
 
-        boolean bool = categoryService
-                .validateCategoryNameIsNotAssignedToCategoryId(
-                        category.getCategoryId(),
-                        "top"
-                );
+        assertTrue(categoryService
+                .validateCategoryNameExist(category.getCategoryId(), "collection")
+        );
 
-        assertFalse(bool);
-
-        categoryService
+        var collection = categoryService
                 .save(
                         ProductCategory
                                 .builder()
-                                .name("top")
+                                .name("collection")
                                 .isVisible(true)
                                 .parentCategory(null)
                                 .categories(new HashSet<>())
@@ -262,13 +259,29 @@ class CategoryServiceImplTest extends AbstractRepositoryTest {
                                 .build()
                 );
 
-        bool = categoryService
-                .validateCategoryNameIsNotAssignedToCategoryId(
-                        category.getCategoryId(),
-                        "top"
+        assertFalse(categoryService
+                .validateCategoryNameExist(category.getCategoryId(), "collection")
+        );
+
+        categoryService
+                .save(
+                        ProductCategory
+                                .builder()
+                                .name("top")
+                                .isVisible(true)
+                                .parentCategory(category)
+                                .categories(new HashSet<>())
+                                .product(new HashSet<>())
+                                .build()
                 );
 
-        assertTrue(bool);
+        assertTrue(categoryService
+                .validateCategoryNameExist(collection.getCategoryId(), "collection")
+        );
+
+        assertFalse(categoryService
+                .validateCategoryNameExist(collection.getCategoryId(), "top")
+        );
     }
 
     @Test
@@ -458,7 +471,148 @@ class CategoryServiceImplTest extends AbstractRepositoryTest {
                 .size()
         );
     }
-    
-    // TODO allProductsByCategoryWorker and productsByCategoryId
+
+    @Test
+    void allProductsByCategoryIdWorker() {
+        var category = categoryService
+                .save(
+                        ProductCategory
+                                .builder()
+                                .name("category")
+                                .isVisible(true)
+                                .parentCategory(null)
+                                .categories(new HashSet<>())
+                                .product(new HashSet<>())
+                                .build()
+                );
+
+        for (int i = 0; i < 40; i++) {
+            productService
+                    .save(
+                            Product.builder()
+                                    .uuid(UUID.randomUUID().toString())
+                                    .name(new Faker().commerce().productName() + (6000 + i))
+                                    .description(new Faker().lorem().fixedString(500))
+                                    .defaultKey("unique-image-key" + 1)
+                                    .productCategory(category)
+                                    .productDetails(new HashSet<>())
+                                    .priceCurrency(new HashSet<>())
+                                    .build()
+                    );
+        }
+
+        var page = categoryService
+                .allProductsByCategoryIdWorker(
+                        category.getCategoryId(),
+                        SarreCurrency.USD,
+                        PageRequest.of(0, 20)
+                );
+
+        assertEquals(40, page.getTotalElements());
+        assertEquals(20, page.getNumberOfElements());
+
+        var page1 = categoryService
+                .allProductsByCategoryIdWorker(
+                        category.getCategoryId(),
+                        SarreCurrency.USD,
+                        PageRequest.of(1, 20)
+                );
+
+        assertEquals(20, page1.getNumberOfElements());
+
+        var page2 = categoryService
+                .allProductsByCategoryIdWorker(
+                        category.getCategoryId(),
+                        SarreCurrency.USD,
+                        PageRequest.of(2, 20)
+                );
+
+        assertEquals(0, page2.getNumberOfElements());
+    }
+
+    @Test
+    void allProductByCategoryIdWhereIsVisibleAndInStock() {
+        var category = categoryService
+                .save(
+                        ProductCategory
+                                .builder()
+                                .name("category")
+                                .isVisible(true)
+                                .parentCategory(null)
+                                .categories(new HashSet<>())
+                                .product(new HashSet<>())
+                                .build()
+                );
+
+        for (int i = 0; i < 40; i++) {
+            productService
+                    .save(
+                            Product.builder()
+                                    .uuid(UUID.randomUUID().toString())
+                                    .name("product 1" + (100 + i))
+                                    .description(new Faker().lorem().fixedString(500))
+                                    .defaultKey("unique-image-key" + 1)
+                                    .productCategory(category)
+                                    .productDetails(new HashSet<>())
+                                    .priceCurrency(new HashSet<>())
+                                    .build()
+                    );
+        }
+
+        var clothes = categoryService
+                .save(
+                        ProductCategory
+                                .builder()
+                                .name("clothes")
+                                .isVisible(true)
+                                .parentCategory(category)
+                                .categories(new HashSet<>())
+                                .product(new HashSet<>())
+                                .build()
+                );
+
+
+        for (int i = 0; i < 20; i++) {
+            productService
+                    .save(
+                            Product.builder()
+                                    .uuid(UUID.randomUUID().toString())
+                                    .name("product 2" + (i + 1))
+                                    .description(new Faker().lorem().fixedString(500))
+                                    .defaultKey("unique-image-key 1" + 1000)
+                                    .productCategory(clothes)
+                                    .productDetails(new HashSet<>())
+                                    .priceCurrency(new HashSet<>())
+                                    .build()
+                    );
+        }
+
+        var page = categoryService
+                .allProductByCategoryIdWhereIsVisibleAndInStock(
+                        category.getCategoryId(),
+                        SarreCurrency.USD,
+                        PageRequest.of(0, 20)
+                );
+
+        assertEquals(60, page.getTotalElements());
+        assertEquals(20, page.getNumberOfElements());
+
+        var page1 = categoryService
+                .allProductByCategoryIdWhereIsVisibleAndInStock(
+                        clothes.getCategoryId(),
+                        SarreCurrency.NGN,
+                        PageRequest.of(0, 20)
+                );
+
+        assertEquals(20, page1.getNumberOfElements());
+
+        var page2 = categoryService
+                .allProductByCategoryIdWhereIsVisibleAndInStock(
+                        clothes.getCategoryId(),
+                        SarreCurrency.NGN,
+                        PageRequest.of(1, 20)
+                );
+        assertEquals(0, page2.getNumberOfElements());
+    }
 
 }

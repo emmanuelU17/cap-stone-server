@@ -21,6 +21,13 @@ public class ProductServiceImpl {
 
     private final JdbcClient jdbcClient;
 
+    public int count() {
+        return jdbcClient
+                .sql("SELECT COUNT(p.product_id) FROM product p;")
+                .query(Integer.class)
+                .single();
+    }
+
     public Product save(@NotNull Product product) {
         String sql = """
         INSERT INTO product (
