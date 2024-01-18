@@ -390,7 +390,7 @@ class CategoryRepositoryTest extends AbstractRepositoryTest {
         }
 
         Page<ProductPojo> pojos = categoryRepo
-                .productsByCategoryId(
+                .allProductsByCategoryIdWhereProductIsVisibleAndInStock(
                         category.getCategoryId(),
                         SarreCurrency.USD,
                         PageRequest.of(0, 20)

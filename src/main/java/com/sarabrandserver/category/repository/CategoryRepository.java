@@ -166,17 +166,22 @@ public interface CategoryRepository extends JpaRepository<ProductCategory, Long>
     p.uuid AS uuid,
     p.name AS name,
     p.description AS description,
-    (SELECT c.currency FROM price_currency c WHERE p.product_id = c.product_id AND c.currency = :#{#currency.name()}) AS currency,
-    (SELECT c.price FROM price_currency c WHERE p.product_id = c.product_id AND c.currency = :#{#currency.name()}) AS price,
+    c.currency AS currency,
+    c.price AS price,
     p.default_image_key AS image
     FROM category c1
     INNER JOIN product p ON c1.id = p.category_id
+    INNER JOIN price_currency c ON p.product_id = c.product_id
     INNER JOIN product_detail d ON p.product_id = d.product_id
     INNER JOIN product_sku s ON d.detail_id = s.detail_id
-    WHERE d.is_visible = TRUE AND s.inventory > 0
-    GROUP BY p.uuid, p.name, p.description, p.default_image_key;
+    WHERE d.is_visible = 1 AND s.inventory > 0 AND c.currency = :#{#currency.name()}
+    GROUP BY c.currency, c.price, p.uuid, p.name, p.description, p.default_image_key;
     """)
-    Page<ProductPojo> productsByCategoryId(long categoryId, SarreCurrency currency, Pageable page);
+    Page<ProductPojo> allProductsByCategoryIdWhereProductIsVisibleAndInStock(
+            long categoryId,
+            SarreCurrency currency,
+            Pageable page
+    );
 
     /**
      * Using native sql query and Spring Data projection, method returns all

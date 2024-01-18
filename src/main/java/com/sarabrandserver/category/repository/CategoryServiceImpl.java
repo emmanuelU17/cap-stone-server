@@ -12,12 +12,14 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.sql.DataSource;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
@@ -29,6 +31,8 @@ import java.util.Optional;
 public class CategoryServiceImpl {
 
     private final JdbcClient jdbcClient;
+    private final JdbcTemplate jdbcTemplate;
+    private final DataSource dataSource;
     private final ProductServiceImpl productService;
 
     public ProductCategory save(@NotNull ProductCategory category) {
@@ -216,10 +220,7 @@ public class CategoryServiceImpl {
      * based on its categoryId
      * */
     @Transactional
-    public void updateCategoryParentId(
-            @NotNull long categoryId,
-            Long parentId
-    ) {
+    public void updateCategoryParentId(@NotNull long categoryId, Long parentId) {
         String sql = """
         UPDATE product_category c
         SET c.parent_category_id = :parent
@@ -311,21 +312,46 @@ public class CategoryServiceImpl {
      * @param page is the of {@code org.springframework.data.domain.Pageable}
      * @return a {@code org.springframework.data.domain.Page} of {@code ProductPojo}
      * */
-    public Page<ProductMapper> allProductByCategoryIdWhereIsVisibleAndInStock(
+    public Page<ProductMapper> allProductsByCategoryIdWhereProductIsVisibleAndInStock(
             @NotNull long categoryId,
             @NotNull SarreCurrency currency,
             @NotNull Pageable page
     ) {
-        record Mapper(String uuid, String name, String description, String currency, BigDecimal price, String image) {}
+        record Mapper(String uuid, String name, String description, String image, SarreCurrency currency, BigDecimal price) {}
 
-        int totalProducts = productService.count();
+        String countSql = """
+        WITH RECURSIVE category (id) AS
+        (
+            SELECT c.category_id
+            FROM product_category c
+            WHERE c.category_id = :id
+            UNION ALL
+            SELECT pc.category_id
+            FROM category cat
+            INNER JOIN product_category pc
+            ON cat.id = pc.parent_category_id
+        )
+        SELECT COUNT(DISTINCT p.product_id)
+        FROM category c1
+        INNER JOIN product p ON c1.id = p.category_id;
+        """;
+
+        int totalProducts = jdbcClient.sql(countSql)
+                .param("id", categoryId)
+                .query(int.class)
+                .single();
 
         String sql = """
         WITH RECURSIVE category (id) AS
         (
-            SELECT c.category_id FROM product_category AS c WHERE c.category_id = :id
+            SELECT c.category_id
+            FROM product_category c
+            WHERE c.category_id = :id
             UNION ALL
-            SELECT pc.category_id FROM category cat INNER JOIN product_category pc ON cat.id = pc.parent_category_id
+            SELECT pc.category_id
+            FROM category cat
+            INNER JOIN product_category pc
+            ON cat.id = pc.parent_category_id
         )
         SELECT
             p.uuid AS uuid,
@@ -336,19 +362,19 @@ public class CategoryServiceImpl {
             p.default_image_key AS image
         FROM category c1
         INNER JOIN product p ON c1.id = p.category_id
-        INNER JOIN product_detail d ON p.product_id = d.product_id
         INNER JOIN price_currency pr ON p.product_id = pr.product_id
+        INNER JOIN product_detail d ON p.product_id = d.product_id
         INNER JOIN product_sku s ON d.detail_id = s.detail_id
         WHERE d.is_visible = 1 AND s.inventory > 0 AND pr.currency = :currency
-        GROUP BY p.uuid, p.name, p.description, p.default_image_key, pr.price, pr.currency
-        LIMIT :size OFFSET :calc;
+        GROUP BY pr.price, pr.currency, p.uuid, p.name, p.description, p.default_image_key
+        LIMIT :size OFFSET :off;
         """;
 
         var list = jdbcClient.sql(sql)
                 .param("id", categoryId)
-                .param("currency", currency.getCurrency())
+                .param("currency", currency)
                 .param("size", page.getPageSize())
-                .param("calc", page.getOffset())
+                .param("off", page.getOffset())
                 .query(Mapper.class)
                 .list()
                 .stream()
@@ -365,7 +391,7 @@ public class CategoryServiceImpl {
             @NotNull SarreCurrency currency,
             @NotNull PageRequest page
     ) {
-        record CXMapper(String uuid, String name, String currency, BigDecimal price, String image) {}
+        record Mapper(String uuid, String name, SarreCurrency currency, BigDecimal price, String image) {}
 
         int totalProducts = productService.count();
 
@@ -374,22 +400,30 @@ public class CategoryServiceImpl {
             p.uuid AS uuid,
             p.name AS name,
             p.default_image_key AS image,
-            c.currency AS currency,
-            c.price AS price
+            (
+                SELECT pr.currency
+                FROM price_currency pr
+                WHERE pr.product_id = p.product_id AND pr.currency = :currency
+            ) AS currency,
+            (
+                SELECT pr.price
+                FROM price_currency pr
+                WHERE pr.product_id = p.product_id AND pr.currency = :currency
+            ) AS price
         FROM product p
         INNER JOIN product_category c ON p.category_id = c.category_id
-        INNER JOIN price_currency c ON p.product_id = c.product_id
-        WHERE c.category_id = :id AND c.currency = :currency
-        GROUP BY p.uuid, p.name, p.default_image_key, c.price, c.currency
+        INNER JOIN price_currency pr ON p.product_id = pr.product_id
+        WHERE c.category_id = :id
+        GROUP BY p.uuid, p.name, p.default_image_key
         LIMIT :size OFFSET :off;
         """;
 
         var list = jdbcClient.sql(sql)
                 .param("id", categoryId)
-                .param("currency", currency.getCurrency())
+                .param("currency", currency)
                 .param("size", page.getPageSize())
                 .param("off", page.getOffset())
-                .query(CXMapper.class)
+                .query(Mapper.class)
                 .stream()
                 .map(m -> new ProductMapper(m.uuid(), m.name(), "",
                         m.currency(), m.price(), m.image(), "")

@@ -531,7 +531,7 @@ class CategoryServiceImplTest extends AbstractRepositoryTest {
     }
 
     @Test
-    void allProductByCategoryIdWhereIsVisibleAndInStock() {
+    void allProductsByCategoryIdWhereProductIsVisibleAndInStock() {
         var category = categoryService
                 .save(
                         ProductCategory
@@ -544,7 +544,7 @@ class CategoryServiceImplTest extends AbstractRepositoryTest {
                                 .build()
                 );
 
-        for (int i = 0; i < 40; i++) {
+        for (int i = 0; i < 20; i++) {
             productService
                     .save(
                             Product.builder()
@@ -571,8 +571,7 @@ class CategoryServiceImplTest extends AbstractRepositoryTest {
                                 .build()
                 );
 
-
-        for (int i = 0; i < 20; i++) {
+        for (int i = 0; i < 5; i++) {
             productService
                     .save(
                             Product.builder()
@@ -588,31 +587,22 @@ class CategoryServiceImplTest extends AbstractRepositoryTest {
         }
 
         var page = categoryService
-                .allProductByCategoryIdWhereIsVisibleAndInStock(
+                .allProductsByCategoryIdWhereProductIsVisibleAndInStock(
                         category.getCategoryId(),
-                        SarreCurrency.USD,
-                        PageRequest.of(0, 20)
-                );
-
-        assertEquals(60, page.getTotalElements());
-        assertEquals(20, page.getNumberOfElements());
-
-        var page1 = categoryService
-                .allProductByCategoryIdWhereIsVisibleAndInStock(
-                        clothes.getCategoryId(),
                         SarreCurrency.NGN,
                         PageRequest.of(0, 20)
                 );
 
-        assertEquals(20, page1.getNumberOfElements());
+        assertEquals(25, page.getTotalElements());
+        assertEquals(20, page.getNumberOfElements());
 
-        var page2 = categoryService
-                .allProductByCategoryIdWhereIsVisibleAndInStock(
-                        clothes.getCategoryId(),
+        var page0 = categoryService
+                .allProductsByCategoryIdWhereProductIsVisibleAndInStock(
+                        category.getCategoryId(),
                         SarreCurrency.NGN,
                         PageRequest.of(1, 20)
                 );
-        assertEquals(0, page2.getNumberOfElements());
+        assertEquals(5, page0.getNumberOfElements());
     }
 
 }

@@ -18,12 +18,12 @@ import static org.springframework.http.HttpStatus.OK;
 @RequiredArgsConstructor
 public class ClientCategoryController {
 
-    private final ClientCategoryService clientCategoryService;
+    private final ClientCategoryService service;
 
     @ResponseStatus(OK)
     @GetMapping(produces = "application/json")
     public List<CategoryResponse> allCategories() {
-        return this.clientCategoryService.allCategories();
+        return this.service.allCategories();
     }
 
     @ResponseStatus(OK)
@@ -34,7 +34,7 @@ public class ClientCategoryController {
             @RequestParam(name = "size", defaultValue = "20") Integer size,
             @RequestParam(name = "currency", defaultValue = "NGN") String currency
     ) {
-        return this.clientCategoryService
+        return this.service
                 .allProductsByCategoryId(SarreCurrency.valueOf(currency), id, page, Math.min(size, 20));
     }
 
